@@ -103,70 +103,112 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
   };
 
   // ================= MARK AS LOST =================
-  
   const handleMarkAsLost = async () => {
-    if (!validateInputs() || !item) return;
+  if (!validateInputs() || !item) return;
 
-    if (!item.isOwner) {
-      setError('❌ Only the NFT owner can mark item as lost');
-      return;
-    }
-
-    if (item.statusCode !== 0) {
-      setError('❌ Item must be in Active status to mark as lost');
-      return;
-    }
-
+  try {
     await executeTransaction(
-      'markAsLost',
+      "markAsLost",
       [parseInt(itemId)],
-      '🔴 Marking item as Lost...'
+      "🔴 Marking item as Lost..."
     );
-  };
+
+    const res = await fetch(
+      `http://localhost:5001/api/items/status/${itemId}/lost`,
+      {
+        method: "PUT",
+        credentials: "include"
+      }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.message);
+
+    setSuccess("✅ Item marked as Lost in blockchain + database");
+    handleSearch();
+
+  } catch (err) {
+    setError(err.message);
+  }
+};
 
   // ================= REPORT AS FOUND =================
   
-  const handleReportFound = async () => {
-    if (!validateInputs() || !item) return;
+ const handleReportFound = async () => {
+  if (!validateInputs() || !item) return;
 
-    if (item.isOwner) {
-      setError('❌ Owner cannot report their own item as found');
-      return;
-    }
+  const finderName = prompt("Enter your name");
+  const phone = prompt("Enter phone number");
+  const email = prompt("Enter email");
+  const message = prompt("Message to owner");
 
-    if (item.statusCode !== 1) {
-      setError('❌ Item must be marked as Lost to report found');
-      return;
-    }
-
+  try {
     await executeTransaction(
-      'reportFound',
+      "reportFound",
       [parseInt(itemId)],
-      '🟢 Reporting item as Found...'
+      "🟢 Reporting item as Found..."
     );
-  };
 
+    const res = await fetch(
+      `http://localhost:5001/api/items/report-found/${itemId}`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          finderName,
+          phone,
+          email,
+          message
+        })
+      }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.message);
+
+    setSuccess("✅ Owner notified successfully");
+    handleSearch();
+
+  } catch (err) {
+    setError(err.message);
+  }
+};
   // ================= CONFIRM RETURN =================
   
-  const handleConfirmReturn = async () => {
-    if (!validateInputs() || !item) return;
+const handleConfirmReturn = async () => {
+  if (!validateInputs() || !item) return;
 
-    if (!item.isOwner) {
-      setError('❌ Only the NFT owner can confirm return');
-      return;
-    }
-
-    if (item.statusCode !== 2) {
-      setError('❌ Item must be reported as Found before confirming return');
-      return;
-    }
-
+  try {
     await executeTransaction(
-      'confirmReturn',
+      "confirmReturn",
       [parseInt(itemId)],
-      '🔄 Confirming return...'
+      "🔄 Confirming return..."
     );
-  };
+
+    const res = await fetch(
+      `http://localhost:5001/api/items/confirm-return/${itemId}`,
+      {
+        method: "PUT",
+        credentials: "include"
+      }
+    );
+
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.message);
+
+    setSuccess("✅ Item returned successfully");
+    handleSearch();
+
+  } catch (err) {
+    setError(err.message);
+  }
+};
 
   // ================= EXECUTE TRANSACTION =================
   

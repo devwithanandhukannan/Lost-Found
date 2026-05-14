@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { parseAbi } from 'viem';
-import "./ViewItems.css";
+
 
 const contractABI = parseAbi([
   'function getItem(uint256 _itemId) public view returns (uint256, address, string memory, string memory, uint8, address)',
