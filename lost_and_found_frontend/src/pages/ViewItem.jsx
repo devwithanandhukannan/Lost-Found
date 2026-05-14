@@ -1,6 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { parseAbi } from 'viem';
-
 
 const contractABI = parseAbi([
   'function getItem(uint256 _itemId) public view returns (uint256, address, string memory, string memory, uint8, address)',
@@ -16,17 +15,48 @@ const statusMap = {
 };
 
 function ViewItem({ userAcc, publicClient, contractAddress, contractABI: passedABI }) {
-
+  const [allItems, setAllItems] = useState([]);
   const [itemId, setItemId] = useState("");
   const [item, setItem] = useState(null);
   const [metadata, setMetadata] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [itemsLoading, setItemsLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
 
-  // ================= FETCH ITEM FROM BLOCKCHAIN =================
+  // ================= FETCH ALL MY ITEMS =================
 
-  const fetchItem = async () => {
+  useEffect(() => {
+    if (userAcc) {
+      fetchAllItems();
+    }
+  }, [userAcc]);
+
+  const fetchAllItems = async () => {
+    setItemsLoading(true);
+    try {
+      const res = await fetch('http://localhost:5001/api/items/my-items', {
+        method: 'GET',
+        credentials: 'include'
+      });
+     
+      const data = await res.json();
+      if (data.success) {
+        setAllItems(data.items);
+      }
+      
+      
+    } catch (error) {
+      console.error('Error fetching items:', error);
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  // ================= FETCH ITEM DETAILS FROM BLOCKCHAIN =================
+
+  const fetchItemDetails = async (id) => {
     try {
       setLoading(true);
       setError("");
@@ -34,38 +64,29 @@ function ViewItem({ userAcc, publicClient, contractAddress, contractABI: passedA
       setItem(null);
       setMetadata(null);
 
-      // ===== VALIDATION =====
-
-      if (!itemId || itemId.trim() === "") {
-        setError("❌ Please enter an Item ID");
-        return;
-      }
-
       if (!publicClient) {
-        setError("❌ Wallet not connected. Please connect MetaMask first.");
+        setError("Wallet not connected. Please connect MetaMask first.");
         return;
       }
 
-      const id = parseInt(itemId);
+      const numId = parseInt(id);
 
-      if (isNaN(id) || id < 0) {
-        setError("❌ Invalid Item ID format");
+      if (isNaN(numId) || numId < 0) {
+        setError("Invalid Item ID format");
         return;
       }
 
-      console.log("🔍 Fetching item #" + id + " from blockchain...");
-      setSuccess("📡 Fetching item from blockchain...");
-
-      // ===== READ FROM BLOCKCHAIN =====
+      console.log(" Fetching item #" + numId + " from blockchain...");
+      setSuccess("Fetching item from blockchain...");
 
       const itemData = await publicClient.readContract({
         address: contractAddress,
         abi: passedABI || contractABI,
         functionName: 'getItem',
-        args: [id],
+        args: [numId],
       });
 
-      console.log("✅ Blockchain data:", itemData);
+      console.log("Blockchain data:", itemData);
 
       const formattedItem = {
         itemId: itemData[0].toString(),
@@ -80,7 +101,7 @@ function ViewItem({ userAcc, publicClient, contractAddress, contractABI: passedA
       };
 
       setItem(formattedItem);
-      setSuccess("✅ Item found! Loading metadata from IPFS...");
+      setSuccess("Item found! Loading metadata from IPFS...");
 
       // ===== FETCH METADATA FROM IPFS =====
 
@@ -100,26 +121,26 @@ function ViewItem({ userAcc, publicClient, contractAddress, contractABI: passedA
 
         const metadataJson = await metadataRes.json();
 
-        console.log("✅ Metadata loaded:", metadataJson);
+        console.log("Metadata loaded:", metadataJson);
 
         setMetadata(metadataJson);
-        setSuccess("✅ Item loaded successfully!");
+        setSuccess("Item loaded successfully!");
 
       } catch (ipfsErr) {
         console.error("⚠️ IPFS fetch error:", ipfsErr);
         setMetadata(null);
-        setSuccess("✅ Item loaded from blockchain (metadata temporarily unavailable)");
+        setSuccess("Item loaded from blockchain (metadata temporarily unavailable)");
       }
 
     } catch (err) {
-      console.error("❌ Error:", err);
+      console.error("Error:", err);
 
       if (err.message?.includes('Contract error')) {
-        setError("❌ Item not found on blockchain");
+        setError("Item not found on blockchain");
       } else if (err.message?.includes('reverted')) {
-        setError("❌ Item does not exist");
+        setError("Item does not exist");
       } else {
-        setError(`❌ ${err.message || 'Failed to fetch item'}`);
+        setError(`${err.message || 'Failed to fetch item'}`);
       }
 
       setItem(null);
@@ -130,601 +151,417 @@ function ViewItem({ userAcc, publicClient, contractAddress, contractABI: passedA
     }
   };
 
-  // ================= HANDLE ENTER KEY =================
+  // ================= HANDLE SEARCH =================
+
+  const handleSearch = async () => {
+    if (!itemId.trim()) {
+      setError("Please enter an Item ID");
+      return;
+    }
+    await fetchItemDetails(itemId);
+  };
+
+  const handleSelectItem = (selectedItem) => {
+    setItemId(selectedItem.itemId.toString());
+    fetchItemDetails(selectedItem.itemId);
+  };
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
-      fetchItem();
+      handleSearch();
     }
+  };
+
+  const handleCloseDetails = () => {
+    setItem(null);
+    setMetadata(null);
+    setItemId("");
+    setError("");
+    setSuccess("");
   };
 
   // ================= RENDER =================
 
   return (
-    <div className="page">
-      <div className="item-card">
-
-        <h1>🔍 Lost & Found NFT Lookup</h1>
-        <p className="subtitle">
-          Enter NFT Item ID to view details on blockchain
-        </p>
-
-        {/* ===== SEARCH BOX ===== */}
-
-        <div className="search-box">
-          <input
-            type="number"
-            placeholder="Enter Item ID (NFT Token ID)..."
-            value={itemId}
-            onChange={(e) => setItemId(e.target.value)}
-            onKeyPress={handleKeyPress}
-            disabled={loading}
-            min="0"
-          />
-          <button
-            onClick={fetchItem}
-            disabled={loading}
-            className="search-button"
-          >
-            {loading ? "⏳ Loading..." : "🔍 Search"}
-          </button>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          
         </div>
+        <button
+          onClick={() => setShowSearch(!showSearch)}
+          className="px-4 py-2 text-sm font-medium bg-black text-white rounded hover:bg-gray-800 transition-colors"
+        >
+          {showSearch ? 'Hide Search' : 'Search Item'}
+        </button>
+      </div>
 
-        {/* ===== ERROR MESSAGE ===== */}
+      {/* Error Message */}
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
 
-        {error && (
-          <div className="error-box">
-            <pre>{error}</pre>
+      {/* Success Message */}
+      {success && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+          <p className="text-sm text-green-700">{success}</p>
+        </div>
+      )}
+
+      {/* SEARCH SECTION - Toggle */}
+      {showSearch && (
+        <div className="bg-white border border-gray-200 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-black mb-4">Search Item by ID</h2>
+          
+          <div className="flex gap-3">
+            <input
+              type="number"
+              placeholder="Enter Item ID..."
+              className="flex-1 px-4 py-2 text-sm border border-gray-200 bg-white text-black placeholder-gray-400 outline-none transition-colors focus:border-black rounded"
+              value={itemId}
+              onChange={(e) => setItemId(e.target.value)}
+              onKeyPress={handleKeyPress}
+              disabled={loading}
+              min="0"
+            />
+            <button 
+              onClick={handleSearch}
+              disabled={loading}
+              className="px-6 py-2 text-sm font-medium bg-black text-white rounded hover:bg-gray-800 disabled:opacity-50 transition-all"
+            >
+              {loading ? 'Searching...' : 'Search'}
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ===== SUCCESS MESSAGE ===== */}
+      {/* MY ITEMS LIST - DEFAULT VIEW */}
+      {!showSearch && !item && (
+        <div className="space-y-4">
+          {itemsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-2 border-gray-300 border-t-black rounded-full animate-spin"></div>
+                <p className="text-sm text-gray-600">Loading your items...</p>
+              </div>
+            </div>
+          ) : allItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 px-4 bg-white border border-gray-200 rounded-lg">
+              <svg className="w-12 h-12 text-gray-400 mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+              </svg>
+              <p className="text-gray-600 text-sm">No items found</p>
+              <p className="text-xs text-gray-500 mt-1">Register an item to view its details</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {allItems.map((listItem) => (
+                <div
+                  key={listItem._id}
+                  className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md hover:border-gray-300 transition-all duration-200 cursor-pointer group"
+                  onClick={() => handleSelectItem(listItem)}
+                >
+                  {/* Image */}
+                  {listItem.imageCID && listItem.imageCID.length > 0 ? (
+                    <div className="relative aspect-square bg-gray-100 overflow-hidden">
+                      <img
+                        src={`https://ipfs.io/ipfs/${listItem.imageCID[0]}`}
+                        alt={listItem.itemName}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                      />
+                    </div>
+                  ) : (
+                    <div className="aspect-square bg-gray-100 flex items-center justify-center">
+                      <svg className="w-8 h-8 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <path d="M21 15l-5-5L5 21" />
+                      </svg>
+                    </div>
+                  )}
 
-        {success && (
-          <div className="success-box">
-            {success}
+                  {/* Content */}
+                  <div className="p-4">
+                    <h3 className="font-semibold text-black text-sm line-clamp-2 mb-2">
+                      {listItem.itemName}
+                    </h3>
+                    
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs text-gray-600">#{listItem.itemId}</span>
+                      <span className={`text-xs font-medium px-2 py-1 rounded ${
+                        listItem.status === 'Active' ? 'bg-blue-100 text-blue-700' :
+                        listItem.status === 'Lost' ? 'bg-red-100 text-red-700' :
+                        listItem.status === 'Found' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>
+                        {listItem.status || 'Unknown'}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-gray-600 space-y-1 mb-3">
+                      <p><span className="font-medium">Category:</span> {listItem.category}</p>
+                      {listItem.color && <p><span className="font-medium">Color:</span> {listItem.color}</p>}
+                    </div>
+
+                    <button className="w-full py-2 text-xs font-medium bg-black text-white rounded hover:bg-gray-800 transition-colors">
+                      View Details
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ITEM DETAILS VIEW */}
+      {item && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          {/* Close Button */}
+          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+            <h2 className="text-lg font-bold text-black">Item Details</h2>
+            <button
+              onClick={handleCloseDetails}
+              className="text-gray-500 hover:text-gray-700 p-1"
+            >
+              <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </div>
-        )}
 
-        {/* ===== LOADING STATE ===== */}
-
-        {loading && (
-          <div className="loading-box">
-            <div className="spinner"></div>
-            <p>Fetching from blockchain...</p>
-          </div>
-        )}
-
-        {/* ===== ITEM DETAILS ===== */}
-
-        {item && (
-          <div className="item-details">
-
-            {/* ===== ITEM IMAGE ===== */}
-
+          {/* Content */}
+          <div className="p-6 space-y-6">
+            {/* Image */}
             {metadata?.imageCID && metadata.imageCID.length > 0 ? (
-              <div className="image-container">
+              <div className="text-center">
                 <img
                   src={`https://gateway.pinata.cloud/ipfs/${metadata.imageCID[0]}`}
                   alt={metadata.itemName || item.itemName}
-                  className="item-image"
+                  className="max-w-full max-h-96 rounded-lg mx-auto border border-gray-200"
                   onError={(e) => {
                     e.target.src = "https://via.placeholder.com/400?text=Image+Not+Available";
                   }}
                 />
               </div>
             ) : (
-              <div className="image-placeholder">
-                <p>📷 Image not available</p>
+              <div className="w-full h-64 bg-gray-100 rounded-lg flex items-center justify-center">
+                <p className="text-gray-600">📷 Image not available</p>
               </div>
             )}
 
-            {/* ===== ITEM HEADER ===== */}
-
-            <div className="item-header">
-              <div>
-                <h2>{metadata?.itemName || item.itemName}</h2>
-                <p className="item-id">NFT Token ID: #{item.itemId}</p>
-              </div>
-              <div className={`status-badge status-${item.status.toLowerCase()}`}>
-                {item.status}
+            {/* Header */}
+            <div className="pb-4 border-b border-gray-200">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-2xl font-bold text-black">{metadata?.itemName || item.itemName}</h3>
+                  <p className="text-sm text-gray-600 mt-2">NFT Token ID: #{item.itemId}</p>
+                </div>
+                <span className={`text-sm font-medium px-3 py-1 rounded ${
+                  item.status === 'Active' ? 'bg-blue-100 text-blue-700' :
+                  item.status === 'Lost' ? 'bg-red-100 text-red-700' :
+                  item.status === 'Found' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-green-100 text-green-700'
+                }`}>
+                  {item.status}
+                </span>
               </div>
             </div>
 
-            {/* ===== DESCRIPTION ===== */}
-
+            {/* Description */}
             {metadata?.description && (
-              <div className="section">
-                <h3>📝 Description</h3>
-                <p>{metadata.description}</p>
+              <div>
+                <p className="text-sm font-semibold text-gray-700 mb-2">Description</p>
+                <p className="text-sm text-gray-600 leading-relaxed">{metadata.description}</p>
               </div>
             )}
 
-            {/* ===== ITEM DETAILS GRID ===== */}
-
+            {/* Details Grid */}
             {metadata && (
-              <div className="details-grid">
-
+              <div className="grid grid-cols-2 gap-4">
                 {metadata.category && (
-                  <div className="detail-item">
-                    <span className="detail-label">📦 Category</span>
-                    <p className="detail-value">{metadata.category}</p>
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Category</p>
+                    <p className="text-sm text-black">{metadata.category}</p>
                   </div>
                 )}
 
                 {metadata.brand && (
-                  <div className="detail-item">
-                    <span className="detail-label">🏢 Brand</span>
-                    <p className="detail-value">{metadata.brand}</p>
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Brand</p>
+                    <p className="text-sm text-black">{metadata.brand}</p>
                   </div>
                 )}
 
                 {metadata.model && (
-                  <div className="detail-item">
-                    <span className="detail-label">⚙️ Model</span>
-                    <p className="detail-value">{metadata.model}</p>
-                  </div>
-                )}
-
-                {metadata.serialNumber && (
-                  <div className="detail-item">
-                    <span className="detail-label">🔢 Serial Number</span>
-                    <p className="detail-value">{metadata.serialNumber}</p>
-                  </div>
-                )}
-
-                {metadata.imei && (
-                  <div className="detail-item">
-                    <span className="detail-label">📱 IMEI</span>
-                    <p className="detail-value">{metadata.imei}</p>
-                  </div>
-                )}
-
-                {metadata.macAddress && (
-                  <div className="detail-item">
-                    <span className="detail-label">🌐 MAC Address</span>
-                    <p className="detail-value">{metadata.macAddress}</p>
-                  </div>
-                )}
-
-                {metadata.operatingSystem && (
-                  <div className="detail-item">
-                    <span className="detail-label">💻 Operating System</span>
-                    <p className="detail-value">{metadata.operatingSystem}</p>
-                  </div>
-                )}
-
-                {metadata.storageCapacity && (
-                  <div className="detail-item">
-                    <span className="detail-label">💾 Storage</span>
-                    <p className="detail-value">{metadata.storageCapacity}</p>
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Model</p>
+                    <p className="text-sm text-black">{metadata.model}</p>
                   </div>
                 )}
 
                 {metadata.color && (
-                  <div className="detail-item">
-                    <span className="detail-label">🎨 Color</span>
-                    <p className="detail-value">{metadata.color}</p>
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Color</p>
+                    <p className="text-sm text-black">{metadata.color}</p>
+                  </div>
+                )}
+
+                {metadata.serialNumber && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Serial Number</p>
+                    <p className="text-xs text-black font-mono bg-gray-50 p-2 rounded border border-gray-200">{metadata.serialNumber}</p>
                   </div>
                 )}
 
                 {metadata.condition && (
-                  <div className="detail-item">
-                    <span className="detail-label">✨ Condition</span>
-                    <p className="detail-value">{metadata.condition}</p>
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Condition</p>
+                    <p className="text-sm text-black">{metadata.condition}</p>
+                  </div>
+                )}
+
+                {metadata.imei && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">IMEI</p>
+                    <p className="text-xs text-black font-mono bg-gray-50 p-2 rounded border border-gray-200">{metadata.imei}</p>
+                  </div>
+                )}
+
+                {metadata.macAddress && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">MAC Address</p>
+                    <p className="text-xs text-black font-mono bg-gray-50 p-2 rounded border border-gray-200">{metadata.macAddress}</p>
+                  </div>
+                )}
+
+                {metadata.operatingSystem && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Operating System</p>
+                    <p className="text-sm text-black">{metadata.operatingSystem}</p>
+                  </div>
+                )}
+
+                {metadata.storageCapacity && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Storage</p>
+                    <p className="text-sm text-black">{metadata.storageCapacity}</p>
                   </div>
                 )}
 
                 {metadata.customMarkings && (
-                  <div className="detail-item full-width">
-                    <span className="detail-label">🔍 Custom Markings</span>
-                    <p className="detail-value">{metadata.customMarkings}</p>
+                  <div className="col-span-2">
+                    <p className="text-xs font-medium text-gray-700 mb-1">Custom Markings</p>
+                    <p className="text-sm text-black">{metadata.customMarkings}</p>
                   </div>
                 )}
 
                 {metadata.timestamp && (
-                  <div className="detail-item">
-                    <span className="detail-label">⏰ Registered</span>
-                    <p className="detail-value">
-                      {new Date(metadata.timestamp).toLocaleString()}
-                    </p>
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Registered</p>
+                    <p className="text-sm text-black">{new Date(metadata.timestamp).toLocaleDateString()}</p>
                   </div>
                 )}
               </div>
             )}
 
-            {/* ===== BLOCKCHAIN DETAILS ===== */}
-
-            <div className="section blockchain-section">
-              <h3>⛓️ Blockchain Details</h3>
-
-              <div className="blockchain-grid">
-                <div className="blockchain-item">
-                  <span className="detail-label">Owner Address</span>
-                  <p className="detail-value monospace">
-                    {item.owner.substring(0, 10)}...{item.owner.substring(30)}
-                  </p>
-                  <a 
-                    href={`https://explorer.hoodi.soneium.org/address/${item.owner}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="blockchain-link"
-                  >
-                    View on Explorer →
-                  </a>
+            {/* Blockchain Details */}
+            <div className="border-t border-gray-200 pt-6">
+              <p className="text-sm font-semibold text-gray-700 mb-4">Blockchain Details</p>
+              
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs font-medium text-gray-700 mb-1">Owner Address</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-black font-mono bg-gray-50 p-2 rounded border border-gray-200 flex-1 break-all">
+                      {item.owner.substring(0, 10)}...{item.owner.substring(30)}
+                    </p>
+                    <a 
+                      href={`https://explorer.hoodi.soneium.org/address/${item.owner}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-black hover:text-gray-700 font-medium whitespace-nowrap"
+                    >
+                      View →
+                    </a>
+                  </div>
                 </div>
 
                 {item.finder !== '0x0000000000000000000000000000000000000000' && (
-                  <div className="blockchain-item">
-                    <span className="detail-label">Finder Address</span>
-                    <p className="detail-value monospace">
-                      {item.finder.substring(0, 10)}...{item.finder.substring(30)}
-                    </p>
-                    <a 
-                      href={`https://explorer.hoodi.soneium.org/address/${item.finder}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="blockchain-link"
-                    >
-                      View on Explorer →
-                    </a>
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Finder Address</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-black font-mono bg-gray-50 p-2 rounded border border-gray-200 flex-1 break-all">
+                        {item.finder.substring(0, 10)}...{item.finder.substring(30)}
+                      </p>
+                      <a 
+                        href={`https://explorer.hoodi.soneium.org/address/${item.finder}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-black hover:text-gray-700 font-medium whitespace-nowrap"
+                      >
+                        View →
+                      </a>
+                    </div>
                   </div>
                 )}
 
-                <div className="blockchain-item">
-                  <span className="detail-label">Status Code</span>
-                  <p className="detail-value">{item.statusCode}</p>
+                <div>
+                  <p className="text-xs font-medium text-gray-700 mb-1">Status Code</p>
+                  <p className="text-sm text-black">{item.statusCode}</p>
                 </div>
 
-                <div className="blockchain-item full-width">
-                  <span className="detail-label">IPFS Metadata CID</span>
-                  <p className="detail-value monospace">
-                    {item.ipfsCID}
-                  </p>
-                  <a 
-                    href={`https://gateway.pinata.cloud/ipfs/${item.ipfsCID}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="blockchain-link"
-                  >
-                    📦 View on IPFS →
-                  </a>
+                <div>
+                  <p className="text-xs font-medium text-gray-700 mb-1">IPFS Metadata</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-black font-mono bg-gray-50 p-2 rounded border border-gray-200 flex-1 break-all">
+                      {item.ipfsCID.substring(0, 20)}...
+                    </p>
+                    <a 
+                      href={`https://gateway.pinata.cloud/ipfs/${item.ipfsCID}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-black hover:text-gray-700 font-medium whitespace-nowrap"
+                    >
+                      View →
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* ===== SHARE SECTION ===== */}
-
-            <div className="section share-section">
-              <h3>📤 Share This Item</h3>
-              <div className="share-buttons">
+            {/* Share Section */}
+            <div className="border-t border-gray-200 pt-6">
+              <p className="text-sm font-semibold text-gray-700 mb-3">Share This Item</p>
+              <div className="flex gap-3">
                 <button 
                   onClick={() => {
                     navigator.clipboard.writeText(window.location.href);
                     alert('Link copied to clipboard!');
                   }}
-                  className="share-btn"
+                  className="flex-1 py-2 px-4 text-sm font-medium bg-black text-white rounded hover:bg-gray-800 transition-colors"
                 >
-                  📋 Copy Link
+                 Copy Link
                 </button>
                 <a 
                   href={`https://explorer.hoodi.soneium.org/token/${contractAddress}?a=${item.itemId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="share-btn"
+                  className="flex-1 py-2 px-4 text-sm font-medium bg-gray-100 text-black rounded hover:bg-gray-200 transition-colors text-center"
                 >
-                  🔗 View NFT
+                 View NFT
                 </a>
               </div>
             </div>
-
           </div>
-        )}
-
-        {/* ===== NO ITEM SELECTED ===== */}
-
-        {!item && !loading && itemId && !error && (
-          <div className="info-box">
-            👆 Click Search to fetch item details from blockchain
-          </div>
-        )}
-
-      </div>
-
-      <style jsx>{`
-        .search-button {
-          padding: 0.75rem 1.5rem;
-          background: #007bff;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.2s;
-          font-size: 1rem;
-        }
-
-        .search-button:hover:not(:disabled) {
-          background: #0056b3;
-        }
-
-        .search-button:disabled {
-          background: #6c757d;
-          cursor: not-allowed;
-          opacity: 0.65;
-        }
-
-        .error-box {
-          padding: 1rem;
-          background: #f8d7da;
-          border: 2px solid #f5c6cb;
-          border-radius: 6px;
-          color: #721c24;
-          margin: 1rem 0;
-        }
-
-        .error-box pre {
-          margin: 0;
-          font-family: 'Courier New', monospace;
-          font-size: 0.9rem;
-          white-space: pre-wrap;
-          word-wrap: break-word;
-        }
-
-        .success-box {
-          padding: 1rem;
-          background: #d4edda;
-          border: 2px solid #c3e6cb;
-          border-radius: 6px;
-          color: #155724;
-          margin: 1rem 0;
-          animation: slideIn 0.3s ease-out;
-        }
-
-        @keyframes slideIn {
-          from {
-            opacity: 0;
-            transform: translateY(-10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        .loading-box {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 2rem;
-          text-align: center;
-        }
-
-        .spinner {
-          width: 40px;
-          height: 40px;
-          border: 4px solid #f3f3f3;
-          border-top: 4px solid #007bff;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 1rem;
-        }
-
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-
-        .item-details {
-          margin-top: 2rem;
-          animation: slideIn 0.3s ease-out;
-        }
-
-        .image-container {
-          margin-bottom: 2rem;
-          text-align: center;
-        }
-
-        .item-image {
-          max-width: 100%;
-          max-height: 400px;
-          border-radius: 8px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        .image-placeholder {
-          width: 100%;
-          height: 300px;
-          background: #f0f0f0;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #999;
-          margin-bottom: 2rem;
-        }
-
-        .item-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: 2rem;
-          padding-bottom: 1rem;
-          border-bottom: 2px solid #e0e0e0;
-        }
-
-        .item-id {
-          margin: 0.5rem 0 0 0;
-          color: #666;
-          font-size: 0.9rem;
-        }
-
-        .status-badge {
-          padding: 0.5rem 1rem;
-          border-radius: 20px;
-          font-weight: 600;
-          font-size: 0.9rem;
-        }
-
-        .status-active {
-          background: #cce5ff;
-          color: #004085;
-        }
-
-        .status-lost {
-          background: #f8d7da;
-          color: #721c24;
-        }
-
-        .status-found {
-          background: #fff3cd;
-          color: #856404;
-        }
-
-        .status-returned {
-          background: #d4edda;
-          color: #155724;
-        }
-
-        .section {
-          margin-bottom: 2rem;
-          padding-bottom: 2rem;
-          border-bottom: 1px solid #e0e0e0;
-        }
-
-        .section h3 {
-          margin-top: 0;
-          margin-bottom: 1rem;
-          font-size: 1.1rem;
-          color: #333;
-        }
-
-        .section p {
-          margin: 0.5rem 0;
-          color: #555;
-          line-height: 1.6;
-        }
-
-        .details-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 1rem;
-          margin-bottom: 2rem;
-        }
-
-        .detail-item {
-          padding: 1rem;
-          background: #f8f9fa;
-          border-radius: 6px;
-          border-left: 4px solid #007bff;
-        }
-
-        .detail-item.full-width {
-          grid-column: 1 / -1;
-        }
-
-        .detail-label {
-          display: block;
-          font-size: 0.85rem;
-          color: #666;
-          font-weight: 600;
-          margin-bottom: 0.5rem;
-          text-transform: uppercase;
-        }
-
-        .detail-value {
-          margin: 0;
-          font-size: 0.95rem;
-          color: #333;
-          word-break: break-word;
-        }
-
-        .monospace {
-          font-family: 'Courier New', monospace;
-          font-size: 0.85rem;
-        }
-
-        .blockchain-section {
-          background: #f8f9fa;
-          padding: 1.5rem;
-          border-radius: 8px;
-          border-left: 4px solid #ffc107;
-        }
-
-        .blockchain-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 1rem;
-          margin-top: 1rem;
-        }
-
-        .blockchain-item {
-          background: white;
-          padding: 1rem;
-          border-radius: 6px;
-          border: 1px solid #e0e0e0;
-        }
-
-        .blockchain-item.full-width {
-          grid-column: 1 / -1;
-        }
-
-        .blockchain-link {
-          display: inline-block;
-          margin-top: 0.5rem;
-          color: #007bff;
-          text-decoration: none;
-          font-size: 0.85rem;
-          font-weight: 600;
-          transition: color 0.2s;
-        }
-
-        .blockchain-link:hover {
-          color: #0056b3;
-          text-decoration: underline;
-        }
-
-        .share-section {
-          background: #e7f3ff;
-          padding: 1.5rem;
-          border-radius: 8px;
-          border-left: 4px solid #0056b3;
-        }
-
-        .share-buttons {
-          display: flex;
-          gap: 0.75rem;
-          flex-wrap: wrap;
-        }
-
-        .share-btn {
-          padding: 0.75rem 1rem;
-          background: #007bff;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          text-decoration: none;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.2s;
-          display: inline-block;
-        }
-
-        .share-btn:hover {
-          background: #0056b3;
-        }
-
-        .info-box {
-          padding: 1rem;
-          background: #d1ecf1;
-          border: 2px solid #bee5eb;
-          border-radius: 6px;
-          color: #0c5460;
-          text-align: center;
-          margin-top: 1rem;
-        }
-      `}</style>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 // src/pages/RegisterItem.jsx
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 import { uploadToIPFS, uploadMetadataToIPFS } from "../api/blockchainApi.js";
 
 const RegisterItem = ({
@@ -8,10 +9,10 @@ const RegisterItem = ({
     publicClient,
     contractAddress,
     contractABI,
+    addNotification,
 }) => {
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState("");
-    const [success, setSuccess] = useState("");
+    const [step, setStep] = useState(1);
     const [preview, setPreview] = useState([]);
 
     const [formData, setFormData] = useState({
@@ -31,8 +32,6 @@ const RegisterItem = ({
         images: [],
     });
 
-    // ================= HANDLERS =================
-
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData({ ...formData, [name]: value });
@@ -42,7 +41,11 @@ const RegisterItem = ({
         const files = Array.from(e.target.files);
 
         if (files.length > 3) {
-            setError("⚠️ Maximum 3 images allowed");
+            addNotification({
+                type: 'warning',
+                title: 'Too Many Images',
+                message: 'Maximum 3 images allowed'
+            });
             return;
         }
 
@@ -53,64 +56,62 @@ const RegisterItem = ({
             .map((file) => URL.createObjectURL(file));
 
         setPreview(imageUrls);
-        setError("");
     };
-
-    // ================= CATEGORY CHECKS =================
 
     const isMobile = formData.category === "Mobile";
     const isElectronic = ["Mobile", "Laptop", "Tablet"].includes(formData.category);
-    const isDocument = formData.category === "Document";
-
-    // ================= REGISTER ITEM =================
 
     const handleRegister = async (e) => {
         e.preventDefault();
-        setError("");
-        setSuccess("");
-
 
         if (!userAcc || !walletClient || !publicClient) {
-            setError("❌ Please connect MetaMask first");
+            addNotification({
+                type: 'error',
+                title: 'Wallet Not Connected',
+                message: 'Please connect MetaMask first'
+            });
             return;
         }
 
         if (!formData.itemName.trim()) {
-            setError("❌ Item name is required");
+            addNotification({
+                type: 'error',
+                title: 'Item Name Required',
+                message: 'Please enter an item name'
+            });
             return;
         }
 
         if (formData.images.length === 0) {
-            setError("❌ Upload at least 1 image");
+            addNotification({
+                type: 'error',
+                title: 'Images Required',
+                message: 'Upload at least 1 image'
+            });
             return;
         }
 
         setLoading(true);
 
         try {
-            // -----------------------------------
-            // STEP 1: Upload images to IPFS
-            // -----------------------------------
-            setSuccess("📤 Uploading images to IPFS...");
+            addNotification({
+                type: 'info',
+                title: 'Uploading',
+                message: 'Uploading images to IPFS...'
+            });
 
             const uploadedImages = [];
-
             for (const file of formData.images) {
                 const uploadRes = await uploadToIPFS(file);
-
-                if (!uploadRes.success) {
-                    throw new Error(uploadRes.message);
-                }
-
+                if (!uploadRes.success) throw new Error(uploadRes.message);
                 uploadedImages.push(uploadRes.cid);
             }
 
-            console.log("Uploaded Images:", uploadedImages);
-
-            // -----------------------------------
-            // STEP 2: Upload minimal metadata to IPFS
-            // -----------------------------------
-            setSuccess("📤 Uploading metadata to IPFS...");
+            addNotification({
+                type: 'info',
+                title: 'Uploading',
+                message: 'Uploading metadata...'
+            });
 
             const metadata = {
                 itemName: formData.itemName,
@@ -121,19 +122,15 @@ const RegisterItem = ({
             };
 
             const metadataRes = await uploadMetadataToIPFS(metadata);
-
-            if (!metadataRes.success) {
-                throw new Error("Metadata upload failed");
-            }
+            if (!metadataRes.success) throw new Error("Metadata upload failed");
 
             const metadataCID = metadataRes.cid;
 
-            console.log("Metadata CID:", metadataCID);
-
-            // -----------------------------------
-            // STEP 3: Blockchain Registration
-            // -----------------------------------
-            setSuccess("⛓️ Confirm transaction in MetaMask...");
+            addNotification({
+                type: 'info',
+                title: 'Blockchain',
+                message: 'Confirm transaction in MetaMask...'
+            });
 
             const hash = await walletClient.writeContract({
                 address: contractAddress,
@@ -149,14 +146,12 @@ const RegisterItem = ({
             });
 
             let itemId = null;
-
             try {
                 const counter = await publicClient.readContract({
                     address: contractAddress,
                     abi: contractABI,
                     functionName: "tokenCounter",
                 });
-
                 itemId = Number(counter.toString()) - 1;
             } catch (err) {
                 console.log("Error fetching itemId:", err);
@@ -165,15 +160,12 @@ const RegisterItem = ({
             const txHash = receipt.transactionHash;
             const blockNumber = Number(receipt.blockNumber);
 
-            // -----------------------------------
-            // STEP 4: Save full details in backend DB
-            // -----------------------------------
-            setSuccess("💾 Saving item details to database...");
-            console.log({
-                itemId,
-                blockNumber,
-                txHash
+            addNotification({
+                type: 'info',
+                title: 'Saving',
+                message: 'Saving to database...'
             });
+
             const dbPayload = {
                 itemId: Number(itemId),
                 itemName: formData.itemName,
@@ -196,42 +188,21 @@ const RegisterItem = ({
                 walletAddress: userAcc
             };
 
-            const dbRes = await fetch(
-                "http://localhost:5001/api/items/register",
-                {
-                    method: "POST",
-                    credentials: "include",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify(dbPayload)
-                }
-            );
+            const dbRes = await fetch("http://localhost:5001/api/items/register", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(dbPayload)
+            });
 
             const dbData = await dbRes.json();
+            if (!dbRes.ok) throw new Error(dbData.message || "Database save failed");
 
-            if (!dbRes.ok) {
-                throw new Error(dbData.message || "Database save failed");
-            }
-
-            console.log("Saved to DB:", dbData);
-
-            // -----------------------------------
-            // SUCCESS
-            // -----------------------------------
-            setSuccess(`
-✅ Item Registered Successfully!
-
-🎫 Item ID: #${itemId}
-📦 Metadata CID: ${metadataCID}
-🔗 TX Hash: ${txHash}
-📊 Block: ${blockNumber}
-
-Stored:
-✔ Blockchain → Ownership proof
-✔ IPFS → Images + metadata
-✔ Database → Full item details
-    `);
+            addNotification({
+                type: 'success',
+                title: 'Item Registered',
+                message: `Successfully registered item #${itemId}`
+            });
 
             // Reset form
             setFormData({
@@ -250,140 +221,192 @@ Stored:
                 customMarkings: "",
                 images: [],
             });
-
             setPreview([]);
+            setStep(1);
 
         } catch (err) {
             console.error(err);
-            setError(err.message || "Registration failed");
+            addNotification({
+                type: 'error',
+                title: 'Registration Failed',
+                message: err.message || 'Something went wrong'
+            });
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="max-w-4xl mx-auto">
-            <div className="mb-8 text-center">
-                <h2 className="text-3xl font-semibold mb-2">📝 Register New Item</h2>
-                <p className="text-gray-400">🎫 Mint an NFT to prove ownership on Hoodi blockchain</p>
+        <div className="max-w-2xl mx-auto">
+            {/* Header */}
+            <div className="mb-8">
+                <h2 className="text-3xl font-bold text-black">Register New Product</h2>
+                <p className="text-gray-600 mt-2">Mint an NFT to prove ownership on the blockchain</p>
             </div>
 
-            {/* Error Message */}
-            {error && (
-                <div className="mb-6 p-4 bg-red-950/50 border border-red-800 rounded-xl">
-                    <pre className="text-red-400 whitespace-pre-wrap text-sm">{error}</pre>
-                </div>
-            )}
+            {/* Progress Indicator */}
+            <div className="flex gap-2 mb-12">
+                {[1, 2, 3].map((s) => (
+                    <motion.div
+                        key={s}
+                        className={`flex-1 h-2 rounded-full ${
+                            s <= step ? 'bg-black' : 'bg-gray-200'
+                        }`}
+                        initial={false}
+                        animate={{ backgroundColor: s <= step ? '#000000' : '#e5e5e5' }}
+                    />
+                ))}
+            </div>
 
-            {/* Success Message */}
-            {success && (
-                <div className="mb-6 p-4 bg-green-950/50 border border-green-800 rounded-xl">
-                    <pre className="text-green-400 whitespace-pre-wrap text-sm">{success}</pre>
-                </div>
-            )}
+            <form onSubmit={handleRegister} className="space-y-8">
+                {/* Step 1: Basic Info */}
+                {step === 1 && (
+                    <motion.div
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="space-y-6 bg-white border border-gray-200 rounded-xl p-6"
+                    >
+                        <h3 className="text-lg font-semibold text-black">Basic Information</h3>
 
-            <form onSubmit={handleRegister} className="space-y-10">
-                {/* ========== BASIC INFORMATION ========== */}
-                <div>
-                    <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                        📋 <span>Basic Information</span>
-                    </h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-black mb-2">
+                                    Item Name *
+                                </label>
+                                <input
+                                    type="text"
+                                    name="itemName"
+                                    required
+                                    placeholder="e.g., iPhone 15 Pro Max"
+                                    value={formData.itemName}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                                />
+                            </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-400">Item Name *</label>
-                            <input
-                                type="text"
-                                name="itemName"
-                                required
-                                placeholder="e.g., iPhone 15 Pro Max"
-                                value={formData.itemName}
-                                onChange={handleChange}
-                                className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
-                            />
+                            <div>
+                                <label className="block text-sm font-medium text-black mb-2">
+                                    Category *
+                                </label>
+                                <select
+                                    name="category"
+                                    required
+                                    value={formData.category}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                                >
+                                    <option value="">Select Category</option>
+                                    <option value="Mobile">Mobile Phone</option>
+                                    <option value="Laptop">Laptop</option>
+                                    <option value="Tablet">Tablet</option>
+                                    <option value="Document">Document</option>
+                                    <option value="Accessory">Accessory</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-black mb-2">
+                                    Description
+                                </label>
+                                <textarea
+                                    name="description"
+                                    rows="4"
+                                    placeholder="Describe your item in detail..."
+                                    value={formData.description}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent resize-none"
+                                />
+                            </div>
                         </div>
 
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-400">Category *</label>
-                            <select
-                                name="category"
-                                required
-                                value={formData.category}
-                                onChange={handleChange}
-                                className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white focus:outline-none focus:border-blue-500 transition"
+                        <div className="flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setStep(2)}
+                                className="px-6 py-2.5 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
                             >
-                                <option value="">Select Category</option>
-                                <option value="Mobile">📱 Mobile</option>
-                                <option value="Laptop">💻 Laptop</option>
-                                <option value="Tablet">📲 Tablet</option>
-                                <option value="Document">📄 Document</option>
-                                <option value="Accessory">🎧 Accessory</option>
-                                <option value="Other">📦 Other</option>
-                            </select>
+                                Next →
+                            </button>
                         </div>
-                    </div>
+                    </motion.div>
+                )}
 
-                    <div className="mt-6 space-y-2">
-                        <label className="text-sm font-medium text-gray-400">Description</label>
-                        <textarea
-                            name="description"
-                            rows="4"
-                            placeholder="Describe your item in detail..."
-                            value={formData.description}
-                            onChange={handleChange}
-                            className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition resize-none"
-                        />
-                    </div>
-                </div>
+                {/* Step 2: Device Details */}
+                {step === 2 && (
+                    <motion.div
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="space-y-6 bg-white border border-gray-200 rounded-xl p-6"
+                    >
+                        <h3 className="text-lg font-semibold text-black">Device Details</h3>
 
-                {/* ========== DEVICE INFORMATION ========== */}
-                {!isDocument && (
-                    <div>
-                        <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                            🔧 <span>Device Information</span>
-                        </h3>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-400">Brand / Manufacturer</label>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-black mb-2">
+                                    Brand
+                                </label>
                                 <input
                                     type="text"
                                     name="brand"
-                                    placeholder="e.g., Apple, Samsung, Dell"
+                                    placeholder="e.g., Apple"
                                     value={formData.brand}
                                     onChange={handleChange}
-                                    className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
                                 />
                             </div>
 
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-400">Model Name / Number</label>
+                            <div>
+                                <label className="block text-sm font-medium text-black mb-2">
+                                    Model
+                                </label>
                                 <input
                                     type="text"
                                     name="model"
-                                    placeholder="e.g., iPhone 15 Pro, MacBook Air M2"
+                                    placeholder="e.g., iPhone 15"
                                     value={formData.model}
                                     onChange={handleChange}
-                                    className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
                                 />
                             </div>
 
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-gray-400">Serial Number</label>
+                            <div>
+                                <label className="block text-sm font-medium text-black mb-2">
+                                    Color
+                                </label>
                                 <input
                                     type="text"
-                                    name="serialNumber"
-                                    placeholder="Device Serial Number"
-                                    value={formData.serialNumber}
+                                    name="color"
+                                    placeholder="e.g., Space Black"
+                                    value={formData.color}
                                     onChange={handleChange}
-                                    className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
                                 />
                             </div>
 
-                            {/* Mobile Only - IMEI */}
+                            <div>
+                                <label className="block text-sm font-medium text-black mb-2">
+                                    Condition
+                                </label>
+                                <select
+                                    name="condition"
+                                    value={formData.condition}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                                >
+                                    <option value="">Select</option>
+                                    <option value="New">New</option>
+                                    <option value="Like New">Like New</option>
+                                    <option value="Used">Used</option>
+                                    <option value="Scratched">Scratched</option>
+                                </select>
+                            </div>
+
                             {isMobile && (
-                                <div className="space-y-2">
-                                    <label className="text-sm font-medium text-gray-400">IMEI Number</label>
+                                <div>
+                                    <label className="block text-sm font-medium text-black mb-2">
+                                        IMEI
+                                    </label>
                                     <input
                                         type="text"
                                         name="imei"
@@ -391,185 +414,110 @@ Stored:
                                         value={formData.imei}
                                         onChange={handleChange}
                                         maxLength="15"
-                                        className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
                                     />
-                                    <small className="text-xs text-gray-500">ℹ️ Dial *#06# to find IMEI</small>
                                 </div>
                             )}
 
-                            {/* Electronic Devices */}
-                            {isElectronic && (
-                                <>
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-medium text-gray-400">MAC Address</label>
-                                        <input
-                                            type="text"
-                                            name="macAddress"
-                                            placeholder="WiFi MAC Address"
-                                            value={formData.macAddress}
-                                            onChange={handleChange}
-                                            className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
-                                        />
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-medium text-gray-400">Operating System</label>
-                                        <input
-                                            type="text"
-                                            name="operatingSystem"
-                                            placeholder="e.g., iOS 17, Android 14, Windows 11"
-                                            value={formData.operatingSystem}
-                                            onChange={handleChange}
-                                            className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
-                                        />
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <label className="text-sm font-medium text-gray-400">Storage Capacity</label>
-                                        <input
-                                            type="text"
-                                            name="storageCapacity"
-                                            placeholder="e.g., 256GB, 512GB, 1TB"
-                                            value={formData.storageCapacity}
-                                            onChange={handleChange}
-                                            className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
-                                        />
-                                    </div>
-                                </>
-                            )}
+                            <div>
+                                <label className="block text-sm font-medium text-black mb-2">
+                                    Serial Number
+                                </label>
+                                <input
+                                    type="text"
+                                    name="serialNumber"
+                                    placeholder="Device serial"
+                                    value={formData.serialNumber}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent"
+                                />
+                            </div>
                         </div>
-                    </div>
+
+                        <div className="flex justify-between">
+                            <button
+                                type="button"
+                                onClick={() => setStep(1)}
+                                className="px-6 py-2.5 border border-gray-300 text-black rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                            >
+                                ← Back
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setStep(3)}
+                                className="px-6 py-2.5 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
+                            >
+                                Next →
+                            </button>
+                        </div>
+                    </motion.div>
                 )}
 
-                {/* ========== PHYSICAL DETAILS ========== */}
-                <div>
-                    <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                        🎨 <span>Physical Details</span>
-                    </h3>
+                {/* Step 3: Images */}
+                {step === 3 && (
+                    <motion.div
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="space-y-6 bg-white border border-gray-200 rounded-xl p-6"
+                    >
+                        <h3 className="text-lg font-semibold text-black">Upload Images</h3>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-400">Color</label>
-                            <input
-                                type="text"
-                                name="color"
-                                placeholder="e.g., Space Black, Midnight, Silver"
-                                value={formData.color}
-                                onChange={handleChange}
-                                className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium text-gray-400">Device Condition</label>
-                            <select
-                                name="condition"
-                                value={formData.condition}
-                                onChange={handleChange}
-                                className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white focus:outline-none focus:border-blue-500 transition"
-                            >
-                                <option value="">Select Condition</option>
-                                <option value="New">New</option>
-                                <option value="Like New">Like New</option>
-                                <option value="Used">Used</option>
-                                <option value="Scratched">Scratched</option>
-                                <option value="Cracked">Cracked</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div className="mt-6 space-y-2">
-                        <label className="text-sm font-medium text-gray-400">
-                            Custom Markings / Unique Scratches
-                        </label>
-                        <textarea
-                            name="customMarkings"
-                            rows="3"
-                            placeholder="Describe any unique markings, scratches, stickers, custom cases, or identifying features..."
-                            value={formData.customMarkings}
-                            onChange={handleChange}
-                            className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition resize-none"
-                        />
-                    </div>
-                </div>
-
-                {/* ========== IMAGE UPLOAD ========== */}
-                <div>
-                    <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
-                        📸 <span>Supporting Images / Documents</span>
-                    </h3>
-
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-400">
-                            Upload Device Images, Invoice, Ownership Proof *
-                        </label>
-
-                        <div className="relative">
-                            <input
-                                type="file"
-                                multiple
-                                accept="image/*,.pdf"
-                                onChange={handleFileUpload}
-                                id="file-upload"
-                                className="hidden"
-                            />
-                            <label
-                                htmlFor="file-upload"
-                                className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-zinc-800 rounded-xl cursor-pointer hover:border-blue-500 transition bg-zinc-900/50"
-                            >
-                                <div className="text-lg font-medium mb-1">Click or Drag & Drop</div>
-                                <div className="text-sm text-gray-500">
-                                    Upload up to 3 images (device photos, invoice, purchase receipt)
+                        <div className="space-y-4">
+                            <label className="block">
+                                <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-gray-400 transition-colors">
+                                    <input
+                                        type="file"
+                                        multiple
+                                        accept="image/*"
+                                        onChange={handleFileUpload}
+                                        className="hidden"
+                                    />
+                                    <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+                                        <polyline points="17 8 12 3 7 8" strokeLinecap="round" strokeLinejoin="round" />
+                                        <line x1="12" y1="3" x2="12" y2="15" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                    <p className="text-gray-700 font-medium">Click to upload or drag and drop</p>
+                                    <p className="text-gray-500 text-sm mt-1">Up to 3 images (JPG, PNG)</p>
                                 </div>
                             </label>
+
+                            {preview.length > 0 && (
+                                <div className="grid grid-cols-3 gap-4">
+                                    {preview.map((img, idx) => (
+                                        <div key={idx} className="relative group">
+                                            <img
+                                                src={img}
+                                                alt={`preview-${idx}`}
+                                                className="w-full h-24 object-cover rounded-lg"
+                                            />
+                                            <span className="absolute top-1 right-1 bg-black text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center">
+                                                {idx + 1}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
-                        {/* Image Preview */}
-                        {preview.length > 0 && (
-                            <div className="grid grid-cols-3 gap-4 mt-6">
-                                {preview.map((img, index) => (
-                                    <div key={index} className="relative group">
-                                        <img
-                                            src={img}
-                                            alt={`preview-${index}`}
-                                            className="w-full h-32 object-cover rounded-xl border border-zinc-800"
-                                        />
-                                        <span className="absolute top-2 right-2 bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded-full">
-                                            #{index + 1}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* ========== SUBMIT BUTTON ========== */}
-                <div className="space-y-4">
-                    <button
-                        type="submit"
-                        disabled={loading || !userAcc}
-                        className="w-full py-4 font-semibold text-lg text-white bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl hover:from-blue-700 hover:to-purple-700 disabled:from-gray-700 disabled:to-gray-700 disabled:cursor-not-allowed transition shadow-lg"
-                    >
-                        {loading
-                            ? "⏳ Minting NFT on Hoodi..."
-                            : !userAcc
-                                ? "🔒 Connect Wallet First"
-                                : "🎫 Mint Ownership NFT"}
-                    </button>
-
-                    {!userAcc && (
-                        <p className="text-center text-yellow-500 text-sm">
-                            ⚠️ Please connect your MetaMask wallet to register items
-                        </p>
-                    )}
-
-                    {userAcc && !loading && (
-                        <p className="text-center text-gray-500 text-sm">
-                            💡 Make sure you have enough ETH for gas fees on Hoodi
-                        </p>
-                    )}
-                </div>
+                        <div className="flex justify-between">
+                            <button
+                                type="button"
+                                onClick={() => setStep(2)}
+                                className="px-6 py-2.5 border border-gray-300 text-black rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                            >
+                                ← Back
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="px-6 py-2.5 bg-black text-white rounded-lg font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                            >
+                                {loading ? 'Registering...' : 'Register Item'}
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
             </form>
         </div>
     );

@@ -27,8 +27,8 @@ function App() {
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/view-item" element={<ProtectedRoute><ViewItem /></ProtectedRoute>} />
           <Route path="/make-lost" element={<ProtectedRoute><MakeLost /></ProtectedRoute>} />
-          <Route path="/my-items" element={<MyItems />} />
-          <Route path="/notifications" element={<Notifications />} />
+          <Route path="/my-items" element={<ProtectedRoute><MyItems /></ProtectedRoute>} />
+          <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </AuthProvider>

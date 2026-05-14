@@ -145,12 +145,13 @@ export const reportFoundItem = async (req, res) => {
     const { itemId } = req.params;
     const {
       finderName,
-      finderPhone,
-      finderEmail,
-      finderWallet,
-      message
+      phone,
+      email,
+      message,
+      finderWallet
     } = req.body;
-
+    console.log(req.body);
+    
     const item = await Item.findOne({ itemId }).populate("user");
     console.log(item);
     
@@ -170,8 +171,8 @@ export const reportFoundItem = async (req, res) => {
       itemId: item._id,
       ownerId: item.user._id,
       finderName,
-      phone:finderPhone,
-      email:finderEmail,
+      phone,
+      email,
       wallet:finderWallet,
       message
     });

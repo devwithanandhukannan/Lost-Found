@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { parseAbi } from 'viem';
-
+// MakeLost.jsx
+import React, { useState, useEffect } from 'react';
 import { contractABI } from '../contractABI';
 
 const statusMap = {
@@ -10,28 +9,74 @@ const statusMap = {
   3: 'Returned'
 };
 
-const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contractABI }) => {
-  
+const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contractABI, addNotification }) => {
+  const [items, setItems] = useState([]);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [itemId, setItemId] = useState('');
   const [item, setItem] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [itemsLoading, setItemsLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [transactionPending, setTransactionPending] = useState(false);
+  const [view, setView] = useState('list');
+
+  // ================= FETCH MY ITEMS =================
+  
+  useEffect(() => {
+    if (userAcc) {
+      fetchMyItems();
+    }
+  }, [userAcc]);
+
+  const fetchMyItems = async () => {
+    setItemsLoading(true);
+    try {
+      const res = await fetch('http://localhost:5001/api/items/my-items', {
+        method: 'GET',
+        credentials: 'include'
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setItems(data.items);
+        addNotification({
+          type: 'success',
+          title: 'Items Loaded',
+          message: `Successfully loaded ${data.items.length} items`
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching items:', error);
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to load items'
+      });
+    } finally {
+      setItemsLoading(false);
+    }
+  };
 
   // ================= VALIDATE INPUTS =================
   
   const validateInputs = () => {
     if (!userAcc) {
-      setError('❌ Please connect your MetaMask wallet first');
+      const msg = 'Please connect your MetaMask wallet first';
+      setError(msg);
+      addNotification({ type: 'error', title: 'Wallet Not Connected', message: msg });
       return false;
     }
     if (!walletClient || !publicClient) {
-      setError('❌ Wallet not fully initialized');
+      const msg = 'Wallet not fully initialized';
+      setError(msg);
+      addNotification({ type: 'error', title: 'Initialization Error', message: msg });
       return false;
     }
     if (!itemId || itemId.trim() === '') {
-      setError('❌ Please enter an Item ID');
+      const msg = 'Please enter an Item ID';
+      setError(msg);
+      addNotification({ type: 'error', title: 'Input Required', message: msg });
       return false;
     }
     return true;
@@ -41,7 +86,9 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
   
   const handleSearch = async () => {
     if (!itemId) {
-      setError('❌ Please enter an Item ID');
+      const msg = 'Please enter an Item ID';
+      setError(msg);
+      addNotification({ type: 'error', title: 'Input Required', message: msg });
       return;
     }
 
@@ -51,7 +98,7 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
     setItem(null);
 
     try {
-      console.log('🔍 Searching for item ID:', itemId);
+      console.log('Searching for item ID:', itemId);
       
       const id = parseInt(itemId);
       
@@ -59,7 +106,6 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
         throw new Error('Invalid item ID format');
       }
 
-      // Read item data from contract
       const itemData = await publicClient.readContract({
         address: contractAddress,
         abi: contractABI,
@@ -67,9 +113,8 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
         args: [id],
       });
 
-      console.log('✅ Item found:', itemData);
+      console.log('Item found:', itemData);
 
-      // Get NFT owner
       const owner = await publicClient.readContract({
         address: contractAddress,
         abi: contractABI,
@@ -91,11 +136,76 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
       };
 
       setItem(formattedItem);
-      setSuccess(`✅ Item #${id} found successfully`);
+      const successMsg = `Item #${id} found successfully`;
+      setSuccess(successMsg);
+      addNotification({ type: 'success', title: 'Item Found', message: successMsg });
 
     } catch (err) {
-      console.error('❌ Search error:', err);
-      setError(`❌ ${err.message || 'Item not found or error reading from contract'}`);
+      console.error('Search error:', err);
+      const errorMsg = err.message || 'Item not found or error reading from contract';
+      setError(errorMsg);
+      addNotification({ type: 'error', title: 'Search Failed', message: errorMsg });
+      setItem(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ================= SELECT ITEM FROM LIST =================
+  
+  const handleSelectItem = (selectedItem) => {
+    setItemId(selectedItem.itemId.toString());
+    setSelectedItem(selectedItem);
+    setView('search');
+    setTimeout(() => {
+      handleSearchWithId(selectedItem.itemId);
+    }, 100);
+  };
+
+  const handleSearchWithId = async (id) => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    setItem(null);
+
+    try {
+      const itemData = await publicClient.readContract({
+        address: contractAddress,
+        abi: contractABI,
+        functionName: 'getItem',
+        args: [id],
+      });
+
+      const owner = await publicClient.readContract({
+        address: contractAddress,
+        abi: contractABI,
+        functionName: 'ownerOf',
+        args: [id],
+      });
+
+      const formattedItem = {
+        itemId: itemData[0].toString(),
+        owner: itemData[1].toString(),
+        nftOwner: owner.toString(),
+        itemName: itemData[2].toString(),
+        ipfsCID: itemData[3].toString(),
+        status: statusMap[Number(itemData[4])] || 'Unknown',
+        statusCode: Number(itemData[4]),
+        finder: itemData[5].toString(),
+        isOwner: owner.toLowerCase() === userAcc.toLowerCase(),
+        isFinder: itemData[5].toLowerCase() === userAcc.toLowerCase()
+      };
+
+      setItem(formattedItem);
+      const successMsg = `Item #${id} loaded successfully`;
+      setSuccess(successMsg);
+      addNotification({ type: 'success', title: 'Item Loaded', message: successMsg });
+
+    } catch (err) {
+      console.error('Error:', err);
+      const errorMsg = err.message || 'Error reading from contract';
+      setError(errorMsg);
+      addNotification({ type: 'error', title: 'Load Failed', message: errorMsg });
       setItem(null);
     } finally {
       setLoading(false);
@@ -103,112 +213,134 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
   };
 
   // ================= MARK AS LOST =================
+  
   const handleMarkAsLost = async () => {
-  if (!validateInputs() || !item) return;
+    if (!validateInputs() || !item) return;
 
-  try {
-    await executeTransaction(
-      "markAsLost",
-      [parseInt(itemId)],
-      "🔴 Marking item as Lost..."
-    );
+    try {
+      await executeTransaction(
+        "markAsLost",
+        [parseInt(itemId)],
+        "Marking item as Lost..."
+      );
 
-    const res = await fetch(
-      `http://localhost:5001/api/items/status/${itemId}/lost`,
-      {
-        method: "PUT",
-        credentials: "include"
-      }
-    );
+      const res = await fetch(
+        `http://localhost:5001/api/items/status/${itemId}/lost`,
+        {
+          method: "PUT",
+          credentials: "include"
+        }
+      );
 
-    const data = await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
 
-    if (!res.ok) throw new Error(data.message);
+      const successMsg = "Item marked as Lost in blockchain and database";
+      setSuccess(successMsg);
+      addNotification({ type: 'success', title: 'Item Marked', message: successMsg });
+      handleSearchWithId(parseInt(itemId));
+      fetchMyItems();
 
-    setSuccess("✅ Item marked as Lost in blockchain + database");
-    handleSearch();
-
-  } catch (err) {
-    setError(err.message);
-  }
-};
+    } catch (err) {
+      const errorMsg = err.message;
+      setError(errorMsg);
+      addNotification({ type: 'error', title: 'Mark Failed', message: errorMsg });
+    }
+  };
 
   // ================= REPORT AS FOUND =================
   
- const handleReportFound = async () => {
-  if (!validateInputs() || !item) return;
+  const handleReportFound = async () => {
+    if (!validateInputs() || !item) return;
 
-  const finderName = prompt("Enter your name");
-  const phone = prompt("Enter phone number");
-  const email = prompt("Enter email");
-  const message = prompt("Message to owner");
+    const finderName = prompt("Enter your name");
+    if (!finderName) return;
+    
+    const phone = prompt("Enter phone number");
+    if (!phone) return;
+    
+    const email = prompt("Enter email");
+    if (!email) return;
+    
+    const message = prompt("Message to owner");
+    if (!message) return;
 
-  try {
-    await executeTransaction(
-      "reportFound",
-      [parseInt(itemId)],
-      "🟢 Reporting item as Found..."
-    );
+    try {
+      await executeTransaction(
+        "reportFound",
+        [parseInt(itemId)],
+        "Reporting item as Found..."
+      );
 
-    const res = await fetch(
-      `http://localhost:5001/api/items/report-found/${itemId}`,
-      {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          finderName,
-          phone,
-          email,
-          message
-        })
-      }
-    );
+      const res = await fetch(
+        `http://localhost:5001/api/items/report-found/${itemId}`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            finderName,
+            phone,
+            email,
+            message,
+            finderWallet: userAcc
+          })
+        }
+      );
 
-    const data = await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
 
-    if (!res.ok) throw new Error(data.message);
+      const successMsg = "Owner notified successfully";
+      setSuccess(successMsg);
+      addNotification({ type: 'success', title: 'Owner Notified', message: successMsg });
+      handleSearchWithId(parseInt(itemId));
+      fetchMyItems();
 
-    setSuccess("✅ Owner notified successfully");
-    handleSearch();
+    } catch (err) {
+      const errorMsg = err.message;
+      setError(errorMsg);
+      addNotification({ type: 'error', title: 'Report Failed', message: errorMsg });
+    }
+  };
 
-  } catch (err) {
-    setError(err.message);
-  }
-};
   // ================= CONFIRM RETURN =================
   
-const handleConfirmReturn = async () => {
-  if (!validateInputs() || !item) return;
+  const handleConfirmReturn = async () => {
+    if (!validateInputs() || !item) return;
 
-  try {
-    await executeTransaction(
-      "confirmReturn",
-      [parseInt(itemId)],
-      "🔄 Confirming return..."
-    );
+    try {
+      await executeTransaction(
+        "confirmReturn",
+        [parseInt(itemId)],
+        "Confirming return..."
+      );
 
-    const res = await fetch(
-      `http://localhost:5001/api/items/confirm-return/${itemId}`,
-      {
-        method: "PUT",
-        credentials: "include"
-      }
-    );
+      const res = await fetch(
+        `http://localhost:5001/api/items/confirm-return/${itemId}`,
+        {
+          method: "PUT",
+          credentials: "include"
+        }
+      );
 
-    const data = await res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
 
-    if (!res.ok) throw new Error(data.message);
+      const successMsg = "Item returned successfully";
+      setSuccess(successMsg);
+      addNotification({ type: 'success', title: 'Return Confirmed', message: successMsg });
+      handleSearchWithId(parseInt(itemId));
+      fetchMyItems();
 
-    setSuccess("✅ Item returned successfully");
-    handleSearch();
-
-  } catch (err) {
-    setError(err.message);
-  }
-};
+    } catch (err) {
+      const errorMsg = err.message;
+      setError(errorMsg);
+      addNotification({ type: 'error', title: 'Confirm Failed', message: errorMsg });
+    }
+  };
 
   // ================= EXECUTE TRANSACTION =================
   
@@ -217,11 +349,11 @@ const handleConfirmReturn = async () => {
     setTransactionPending(true);
     setError('');
     setSuccess(statusMessage);
+    addNotification({ type: 'info', title: 'Transaction Started', message: statusMessage });
 
     try {
-      console.log(`⛓️ Executing ${functionName}...`);
+      console.log(`Executing ${functionName}...`);
 
-      // Write to contract
       const hash = await walletClient.writeContract({
         address: contractAddress,
         abi: contractABI,
@@ -230,586 +362,443 @@ const handleConfirmReturn = async () => {
         account: userAcc,
       });
 
-      console.log('📝 Transaction hash:', hash);
-      setSuccess(`⏳ Waiting for confirmation...\n🔗 ${hash.substring(0, 20)}...`);
+      console.log('Transaction hash:', hash);
+      const pendingMsg = `Waiting for confirmation... ${hash.substring(0, 20)}...`;
+      setSuccess(pendingMsg);
+      addNotification({ type: 'info', title: 'Waiting Confirmation', message: pendingMsg });
 
-      // Wait for confirmation
       try {
         const receipt = await publicClient.waitForTransactionReceipt({
           hash: hash,
           timeout: 60_000,
         });
 
-        console.log('✅ Transaction confirmed:', receipt);
+        console.log('Transaction confirmed:', receipt);
 
-        setSuccess(
-          `✅ Transaction Successful!\n\n` +
-          `📝 Function: ${functionName}\n` +
-          `🔗 Hash: ${hash.substring(0, 20)}...\n` +
-          `📊 Block: ${receipt.blockNumber}`
-        );
-
-        // Refresh item data
-        setTimeout(() => {
-          handleSearch();
-        }, 1000);
+        const confirmMsg = `Transaction Successful - Block: ${receipt.blockNumber}`;
+        setSuccess(confirmMsg);
+        addNotification({ 
+          type: 'success', 
+          title: 'Transaction Confirmed', 
+          message: confirmMsg 
+        });
 
       } catch (waitErr) {
         console.log('Transaction sent but confirmation timed out:', waitErr);
-        setSuccess(
-          `✅ Transaction Sent!\n\n` +
-          `📝 Hash: ${hash.substring(0, 20)}...\n` +
-          `⏳ Still processing...\n` +
-          `Refresh in a moment to see updated status`
-        );
+        const timeoutMsg = `Transaction Sent - Hash: ${hash.substring(0, 20)}... (Still processing)`;
+        setSuccess(timeoutMsg);
+        addNotification({ 
+          type: 'warning', 
+          title: 'Confirmation Timeout', 
+          message: 'Transaction sent. Refresh to see updated status.' 
+        });
       }
 
     } catch (err) {
-      console.error('❌ Transaction error:', err);
+      console.error('Transaction error:', err);
 
+      let errorMsg = 'Transaction failed';
       if (err.message?.includes('User rejected') || err.message?.includes('User denied')) {
-        setError('❌ Transaction rejected by user');
+        errorMsg = 'Transaction rejected by user';
       } else if (err.message?.includes('insufficient funds')) {
-        setError('❌ Insufficient ETH for gas fees');
+        errorMsg = 'Insufficient ETH for gas fees';
       } else {
-        setError(`❌ ${err.message || 'Transaction failed'}`);
+        errorMsg = err.message || 'Transaction failed';
       }
+
+      setError(errorMsg);
+      addNotification({ type: 'error', title: 'Transaction Failed', message: errorMsg });
     } finally {
       setLoading(false);
       setTransactionPending(false);
     }
   };
 
-  // ================= RENDER =================
+  // ================= STATUS WORKFLOW COMPONENT =================
+  
+  const StatusWorkflow = ({ statusCode }) => {
+    const steps = [
+      { code: 0, label: 'Active' },
+      { code: 1, label: 'Lost' },
+      { code: 2, label: 'Found' },
+      { code: 3, label: 'Returned' }
+    ];
 
-  return (
-    <div className="container">
-      <div className="card">
-        
-        <h2>🔄 Item Status Management</h2>
-        <p className="subtitle">
-          Track and update item status on blockchain
-        </p>
+    const progressPercentage = (statusCode / 3) * 100;
 
-        {/* ===== CONNECTION CHECK ===== */}
-        
-        {!userAcc && (
-          <div className="error-box">
-            ⚠️ Please connect your MetaMask wallet to manage items
-          </div>
-        )}
+    return (
+      <div className="w-full space-y-4">
+        {/* Multi-step progress bar */}
+        <div className="relative pt-8">
+          {/* Background track */}
+          <div className="absolute top-3 left-0 right-0 h-1 bg-gray-200 rounded-full" />
 
-        {/* ===== ERROR MESSAGE ===== */}
-        
-        {error && (
-          <div className="error-box">
-            <pre>{error}</pre>
-          </div>
-        )}
+          {/* Progress fill */}
+          <div 
+            className="absolute top-3 left-0 h-1 bg-green-500 rounded-full transition-all duration-500"
+            style={{ width: `${progressPercentage}%` }}
+          />
 
-        {/* ===== SUCCESS MESSAGE ===== */}
-        
-        {success && (
-          <div className="success-box">
-            <pre>{success}</pre>
-          </div>
-        )}
+          {/* Step indicators */}
+          <div className="relative flex justify-between items-start">
+            {steps.map((step, idx) => {
+              const isCompleted = statusCode > step.code;
+              const isCurrent = statusCode === step.code;
 
-        {/* ===== SEARCH SECTION ===== */}
-        
-        <div className="search-section">
-          <h3>🔍 Search Item</h3>
-          
-          <div className="search-input-group">
-            <input
-              type="number"
-              placeholder="Enter Item ID (NFT Token ID)..."
-              className="search-input"
-              value={itemId}
-              onChange={(e) => setItemId(e.target.value)}
-              disabled={loading}
-              min="0"
-            />
-            <button 
-              onClick={handleSearch}
-              disabled={loading || !userAcc}
-              className="search-button"
-            >
-              {loading ? '⏳ Searching...' : '🔍 Lookup Item'}
-            </button>
+              return (
+                <div key={step.code} className="flex flex-col items-center">
+                  {/* Circle */}
+                  <div
+                    className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300 ${
+                      isCompleted
+                        ? 'bg-green-500 text-white border-2 border-green-600'
+                        : isCurrent
+                        ? 'bg-white text-green-500 border-2 border-green-500'
+                        : 'bg-white text-gray-400 border-2 border-gray-300'
+                    }`}
+                  >
+                    {isCompleted ? '✓' : idx + 1}
+                  </div>
+
+                  {/* Label */}
+                  <p
+                    className={`text-xs font-medium mt-3 text-center transition-colors duration-300 ${
+                      isCompleted || isCurrent ? 'text-gray-900' : 'text-gray-500'
+                    }`}
+                  >
+                    {step.label}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* ===== ITEM DETAILS ===== */}
-        
-        {item && (
-          <div className="item-details-section">
-            
-            <div className="item-header">
-              <div>
-                <h3>📦 {item.itemName}</h3>
-                <p className="item-id">Item ID: #{item.itemId}</p>
-              </div>
-              <span className={`status-badge status-${item.status.toLowerCase()}`}>
-                {item.status}
-              </span>
-            </div>
+        {/* Progress stats */}
+        <div className="flex justify-between items-center text-xs">
+          <span className="text-gray-600">Progress</span>
+          <span className="font-semibold text-green-600">{statusCode + 1}/4 steps</span>
+        </div>
+      </div>
+    );
+  };
 
-            {/* Item Information */}
-            <div className="item-info-grid">
-              
-              <div className="info-item">
-                <span className="info-label">Owner</span>
-                <span className="info-value">
-                  {item.owner.substring(0, 10)}...{item.owner.substring(30)}
-                </span>
-              </div>
+  // ================= RENDER =================
 
-              <div className="info-item">
-                <span className="info-label">Current NFT Holder</span>
-                <span className="info-value">
-                  {item.nftOwner.substring(0, 10)}...{item.nftOwner.substring(30)}
-                </span>
-              </div>
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      
 
-              <div className="info-item">
-                <span className="info-label">Status Code</span>
-                <span className="info-value">{item.statusCode}</span>
-              </div>
+      {/* Connection Check */}
+      {!userAcc && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700">Please connect your MetaMask wallet to manage items</p>
+        </div>
+      )}
 
-              <div className="info-item">
-                <span className="info-label">Your Role</span>
-                <span className="info-value">
-                  {item.isOwner ? '👤 Owner' : item.isFinder ? '🔎 Finder' : '👁️ Viewer'}
-                </span>
-              </div>
+      {/* Error Message */}
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700 whitespace-pre-line">{error}</p>
+        </div>
+      )}
 
-              {item.finder !== '0x0000000000000000000000000000000000000000' && (
-                <div className="info-item">
-                  <span className="info-label">Finder</span>
-                  <span className="info-value">
-                    {item.finder.substring(0, 10)}...{item.finder.substring(30)}
-                  </span>
-                </div>
-              )}
+      {/* Success Message */}
+      {success && (
+        <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+          <p className="text-sm text-green-700 whitespace-pre-line">{success}</p>
+        </div>
+      )}
 
-              <div className="info-item">
-                <span className="info-label">Metadata CID</span>
-                <a 
-                  href={`https://ipfs.io/ipfs/${item.ipfsCID}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="info-link"
-                >
-                  {item.ipfsCID.substring(0, 15)}...
-                </a>
-              </div>
-            </div>
-
-            {/* Status Transitions */}
-            <div className="actions-section">
-              <h4>📋 Available Actions</h4>
-              
-              <div className="action-buttons">
-                
-                {/* MARK AS LOST */}
-                <button
-                  onClick={handleMarkAsLost}
-                  disabled={
-                    loading || 
-                    !item.isOwner || 
-                    item.statusCode !== 0
-                  }
-                  className="action-btn action-lost"
-                  title={
-                    !item.isOwner ? 'Only owner can mark as lost' :
-                    item.statusCode !== 0 ? 'Item must be in Active status' : 
-                    'Mark item as lost'
-                  }
-                >
-                  <span className="btn-icon">🔴</span>
-                  <span className="btn-text">Mark as Lost</span>
-                </button>
-
-                {/* REPORT FOUND */}
-                <button
-                  onClick={handleReportFound}
-                  disabled={
-                    loading || 
-                    item.isOwner || 
-                    item.statusCode !== 1
-                  }
-                  className="action-btn action-found"
-                  title={
-                    item.isOwner ? 'Owner cannot report own item' :
-                    item.statusCode !== 1 ? 'Item must be marked as Lost' :
-                    'Report item as found'
-                  }
-                >
-                  <span className="btn-icon">🟢</span>
-                  <span className="btn-text">Report Found</span>
-                </button>
-
-                {/* CONFIRM RETURN */}
-                <button
-                  onClick={handleConfirmReturn}
-                  disabled={
-                    loading || 
-                    !item.isOwner || 
-                    item.statusCode !== 2
-                  }
-                  className="action-btn action-returned"
-                  title={
-                    !item.isOwner ? 'Only owner can confirm return' :
-                    item.statusCode !== 2 ? 'Item must be reported as Found' :
-                    'Confirm item return'
-                  }
-                >
-                  <span className="btn-icon">🔄</span>
-                  <span className="btn-text">Confirm Return</span>
-                </button>
-              </div>
-
-              <p className="action-hint">
-                💡 Buttons are disabled based on your role and item status. 
-                {transactionPending && ' Transaction is being processed...'}
-              </p>
-            </div>
-
-            {/* Status Workflow */}
-            <div className="workflow-section">
-              <h4>📊 Status Workflow</h4>
-              <div className="workflow">
-                <div className={`workflow-step ${item.statusCode >= 0 ? 'active' : ''}`}>
-                  <span>Active</span>
-                </div>
-                <span className="workflow-arrow">→</span>
-                <div className={`workflow-step ${item.statusCode >= 1 ? 'active' : ''}`}>
-                  <span>Lost</span>
-                </div>
-                <span className="workflow-arrow">→</span>
-                <div className={`workflow-step ${item.statusCode >= 2 ? 'active' : ''}`}>
-                  <span>Found</span>
-                </div>
-                <span className="workflow-arrow">→</span>
-                <div className={`workflow-step ${item.statusCode >= 3 ? 'active' : ''}`}>
-                  <span>Returned</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ===== NO ITEM SELECTED ===== */}
-        
-        {!item && itemId && !loading && !error && (
-          <div className="info-box">
-            👆 Click "Lookup Item" to fetch item details
-          </div>
-        )}
+      {/* View Tabs */}
+      <div className="flex gap-3 border-b border-gray-200">
+        <button
+          onClick={() => setView('list')}
+          className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            view === 'list'
+              ? 'border-black text-black'
+              : 'border-transparent text-gray-600 hover:text-black'
+          }`}
+        >
+          My Products
+        </button>
+        <button
+          onClick={() => setView('search')}
+          className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+            view === 'search'
+              ? 'border-black text-black'
+              : 'border-transparent text-gray-600 hover:text-black'
+          }`}
+        >
+          Search Item
+        </button>
       </div>
 
-      <style jsx>{`
-        .search-section {
-          margin-bottom: 2rem;
-          padding: 1.5rem;
-          background: #f8f9fa;
-          border-radius: 8px;
-        }
+      {/* MY PRODUCTS LIST VIEW */}
+      {view === 'list' && (
+        <div className="space-y-4">
+          {itemsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-2 border-gray-300 border-t-black rounded-full animate-spin"></div>
+                <p className="text-sm text-gray-600">Loading your products...</p>
+              </div>
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 px-4 bg-white border border-gray-200 rounded-lg">
+              <svg className="w-12 h-12 text-gray-400 mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+              </svg>
+              <p className="text-gray-600 text-sm">No products registered yet</p>
+              <p className="text-xs text-gray-500 mt-1">Register a product to manage its status</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {items.map((item) => (
+                <div
+                  key={item._id}
+                  className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md hover:border-gray-300 transition-all duration-200 cursor-pointer group"
+                  onClick={() => handleSelectItem(item)}
+                >
+                  {/* Image */}
+                  {item.imageCID && item.imageCID.length > 0 ? (
+                    <div className="relative aspect-square bg-gray-100 overflow-hidden">
+                      <img
+                        src={`https://ipfs.io/ipfs/${item.imageCID[0]}`}
+                        alt={item.itemName}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                      />
+                    </div>
+                  ) : (
+                    <div className="aspect-square bg-gray-100 flex items-center justify-center">
+                      <svg className="w-8 h-8 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <path d="M21 15l-5-5L5 21" />
+                      </svg>
+                    </div>
+                  )}
 
-        .search-section h3 {
-          margin-top: 0;
-          margin-bottom: 1rem;
-          font-size: 1.1rem;
-        }
+                  {/* Content */}
+                  <div className="p-4">
+                    <h3 className="font-semibold text-black text-sm line-clamp-2 mb-2">
+                      {item.itemName}
+                    </h3>
+                    
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs text-gray-600">#{item.itemId}</span>
+                      <span className={`text-xs font-medium px-2 py-1 rounded ${
+                        item.status === 'Active' ? 'bg-blue-100 text-blue-700' :
+                        item.status === 'Lost' ? 'bg-red-100 text-red-700' :
+                        item.status === 'Found' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-green-100 text-green-700'
+                      }`}>
+                        {item.status || 'Unknown'}
+                      </span>
+                    </div>
 
-        .search-input-group {
-          display: flex;
-          gap: 0.75rem;
-        }
+                    <div className="text-xs text-gray-600 space-y-1 mb-3">
+                      <p><span className="font-medium">Category:</span> {item.category}</p>
+                      {item.color && <p><span className="font-medium">Color:</span> {item.color}</p>}
+                    </div>
 
-        .search-input {
-          flex: 1;
-          padding: 0.75rem;
-          border: 2px solid #e0e0e0;
-          border-radius: 6px;
-          font-size: 1rem;
-          transition: border-color 0.2s;
-        }
+                    <button className="w-full py-2 text-xs font-medium bg-black text-white rounded hover:bg-gray-800 transition-colors">
+                      Manage Status
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-        .search-input:focus {
-          outline: none;
-          border-color: #007bff;
-          box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
-        }
+      {/* SEARCH VIEW */}
+      {view === 'search' && (
+        <div className="space-y-6">
+          {/* Search Section */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-black mb-4">Search Item by ID</h2>
+            
+            <div className="flex gap-3">
+              <input
+                type="number"
+                placeholder="Enter Item ID..."
+                className="flex-1 px-4 py-2 text-sm border border-gray-200 bg-white text-black placeholder-gray-400 outline-none transition-colors focus:border-black rounded"
+                value={itemId}
+                onChange={(e) => setItemId(e.target.value)}
+                disabled={loading}
+                min="0"
+              />
+              <button 
+                onClick={handleSearch}
+                disabled={loading || !userAcc}
+                className="px-6 py-2 text-sm font-medium bg-black text-white rounded hover:bg-gray-800 disabled:opacity-50 transition-all"
+              >
+                {loading ? 'Searching...' : 'Search'}
+              </button>
+            </div>
+          </div>
 
-        .search-input:disabled {
-          background-color: #f0f0f0;
-          cursor: not-allowed;
-        }
+          {/* Item Details */}
+          {item && (
+            <div className="space-y-4">
+              {/* Item Card */}
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                {/* Header */}
+                <div className="flex items-start justify-between mb-6 pb-4 border-b border-gray-200">
+                  <div>
+                    <h3 className="text-xl font-bold text-black">{item.itemName}</h3>
+                    <p className="text-sm text-gray-600 mt-1">Item ID: #{item.itemId}</p>
+                  </div>
+                  <span className={`text-sm font-medium px-3 py-1 rounded ${
+                    item.status === 'Active' ? 'bg-blue-100 text-blue-700' :
+                    item.status === 'Lost' ? 'bg-red-100 text-red-700' :
+                    item.status === 'Found' ? 'bg-yellow-100 text-yellow-700' :
+                    'bg-green-100 text-green-700'
+                  }`}>
+                    {item.status}
+                  </span>
+                </div>
 
-        .search-button {
-          padding: 0.75rem 1.5rem;
-          background: #007bff;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
+                {/* Info Grid */}
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Owner</p>
+                    <p className="text-sm text-gray-900 font-mono">{item.owner.substring(0, 10)}...{item.owner.substring(30)}</p>
+                  </div>
 
-        .search-button:hover:not(:disabled) {
-          background: #0056b3;
-        }
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">NFT Holder</p>
+                    <p className="text-sm text-gray-900 font-mono">{item.nftOwner.substring(0, 10)}...{item.nftOwner.substring(30)}</p>
+                  </div>
 
-        .search-button:disabled {
-          background: #6c757d;
-          cursor: not-allowed;
-          opacity: 0.65;
-        }
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Your Role</p>
+                    <p className="text-sm text-gray-900">
+                      {item.isOwner ? 'Owner' : item.isFinder ? 'Finder' : 'Viewer'}
+                    </p>
+                  </div>
 
-        .item-details-section {
-          margin-top: 2rem;
-          padding: 1.5rem;
-          background: white;
-          border: 2px solid #e0e0e0;
-          border-radius: 8px;
-          animation: slideIn 0.3s ease-out;
-        }
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Status Code</p>
+                    <p className="text-sm text-gray-900">{item.statusCode}</p>
+                  </div>
 
-        @keyframes slideIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
+                  {item.finder !== '0x0000000000000000000000000000000000000000' && (
+                    <div>
+                      <p className="text-xs font-medium text-gray-700 mb-1">Finder</p>
+                      <p className="text-sm text-gray-900 font-mono">{item.finder.substring(0, 10)}...{item.finder.substring(30)}</p>
+                    </div>
+                  )}
 
-        .item-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 1.5rem;
-          padding-bottom: 1rem;
-          border-bottom: 2px solid #e0e0e0;
-        }
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1">Metadata</p>
+                    <a 
+                      href={`https://ipfs.io/ipfs/${item.ipfsCID}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-black hover:text-gray-700 font-mono"
+                    >
+                      {item.ipfsCID.substring(0, 15)}...
+                    </a>
+                  </div>
+                </div>
 
-        .item-header h3 {
-          margin: 0;
-          font-size: 1.3rem;
-        }
+                {/* Status Workflow - Multi-step Progress Bar */}
+                <div className="mb-6 pb-6 border-b border-gray-200">
+                  <p className="text-sm font-semibold text-gray-700 mb-4">Status Workflow</p>
+                  <StatusWorkflow statusCode={item.statusCode} />
+                </div>
 
-        .item-id {
-          margin: 0.25rem 0 0 0;
-          color: #666;
-          font-size: 0.9rem;
-        }
+                {/* Action Buttons */}
+                <div className="space-y-3">
+                  <p className="text-sm font-semibold text-gray-700 mb-3">Available Actions</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <button
+                      onClick={handleMarkAsLost}
+                      disabled={
+                        loading || 
+                        !item.isOwner || 
+                        item.statusCode !== 0
+                      }
+                      className={`py-3 px-4 text-sm font-medium rounded transition-all ${
+                        !item.isOwner || item.statusCode !== 0
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-red-100 text-red-700 hover:bg-red-200'
+                      }`}
+                      title={
+                        !item.isOwner ? 'Only owner can mark as lost' :
+                        item.statusCode !== 0 ? 'Item must be in Active status' : 
+                        'Mark item as lost'
+                      }
+                    >
+                      Mark as Lost
+                    </button>
 
-        .status-badge {
-          padding: 0.5rem 1rem;
-          border-radius: 20px;
-          font-weight: 600;
-          font-size: 0.9rem;
-        }
+                    <button
+                      onClick={handleReportFound}
+                      disabled={
+                        loading || 
+                        item.isOwner || 
+                        item.statusCode !== 1
+                      }
+                      className={`py-3 px-4 text-sm font-medium rounded transition-all ${
+                        item.isOwner || item.statusCode !== 1
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                      }`}
+                      title={
+                        item.isOwner ? 'Owner cannot report own item' :
+                        item.statusCode !== 1 ? 'Item must be marked as Lost' :
+                        'Report item as found'
+                      }
+                    >
+                      Report Found
+                    </button>
 
-        .status-active {
-          background: #cce5ff;
-          color: #004085;
-        }
+                    <button
+                      onClick={handleConfirmReturn}
+                      disabled={
+                        loading || 
+                        !item.isOwner || 
+                        item.statusCode !== 2
+                      }
+                      className={`py-3 px-4 text-sm font-medium rounded transition-all ${
+                        !item.isOwner || item.statusCode !== 2
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-green-100 text-green-700 hover:bg-green-200'
+                      }`}
+                      title={
+                        !item.isOwner ? 'Only owner can confirm return' :
+                        item.statusCode !== 2 ? 'Item must be reported as Found' :
+                        'Confirm item return'
+                      }
+                    >
+                      Confirm Return
+                    </button>
+                  </div>
 
-        .status-lost {
-          background: #f8d7da;
-          color: #721c24;
-        }
+                  <p className="text-xs text-gray-600 mt-3">
+                    Buttons are disabled based on your role and item status.
+                    {transactionPending && ' Transaction is being processed...'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
-        .status-found {
-          background: #fff3cd;
-          color: #856404;
-        }
-
-        .status-returned {
-          background: #d4edda;
-          color: #155724;
-        }
-
-        .item-info-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 1rem;
-          margin-bottom: 2rem;
-        }
-
-        .info-item {
-          padding: 1rem;
-          background: #f8f9fa;
-          border-radius: 6px;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .info-label {
-          font-size: 0.85rem;
-          color: #666;
-          font-weight: 600;
-          margin-bottom: 0.25rem;
-          text-transform: uppercase;
-        }
-
-        .info-value {
-          font-family: 'Courier New', monospace;
-          font-size: 0.9rem;
-          word-break: break-all;
-          color: #333;
-        }
-
-        .info-link {
-          color: #007bff;
-          text-decoration: none;
-          transition: color 0.2s;
-        }
-
-        .info-link:hover {
-          color: #0056b3;
-          text-decoration: underline;
-        }
-
-        .actions-section {
-          margin-bottom: 2rem;
-          padding: 1.5rem;
-          background: #f8f9fa;
-          border-radius: 8px;
-        }
-
-        .actions-section h4 {
-          margin-top: 0;
-          margin-bottom: 1rem;
-        }
-
-        .action-buttons {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-          gap: 0.75rem;
-          margin-bottom: 1rem;
-        }
-
-        .action-btn {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
-          padding: 1rem;
-          border: none;
-          border-radius: 6px;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 0.2s;
-          font-size: 0.95rem;
-        }
-
-        .btn-icon {
-          font-size: 1.5rem;
-        }
-
-        .action-lost {
-          background: #f8d7da;
-          color: #721c24;
-        }
-
-        .action-lost:hover:not(:disabled) {
-          background: #f5c6cb;
-        }
-
-        .action-found {
-          background: #fff3cd;
-          color: #856404;
-        }
-
-        .action-found:hover:not(:disabled) {
-          background: #ffeaa7;
-        }
-
-        .action-returned {
-          background: #d4edda;
-          color: #155724;
-        }
-
-        .action-returned:hover:not(:disabled) {
-          background: #c3e6cb;
-        }
-
-        .action-btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .action-hint {
-          font-size: 0.9rem;
-          color: #666;
-          margin: 0;
-        }
-
-        .workflow-section {
-          padding: 1.5rem;
-          background: white;
-          border: 2px solid #e0e0e0;
-          border-radius: 8px;
-        }
-
-        .workflow-section h4 {
-          margin-top: 0;
-          margin-bottom: 1rem;
-        }
-
-        .workflow {
-          display: flex;
-          align-items: center;
-          justify-content: space-around;
-          flex-wrap: wrap;
-          gap: 0.5rem;
-        }
-
-        .workflow-step {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 80px;
-          height: 80px;
-          border-radius: 8px;
-          background: #e9ecef;
-          font-weight: 600;
-          font-size: 0.9rem;
-          text-align: center;
-          padding: 0.5rem;
-          color: #666;
-          transition: all 0.2s;
-        }
-
-        .workflow-step.active {
-          background: #007bff;
-          color: white;
-          box-shadow: 0 2px 8px rgba(0, 123, 255, 0.3);
-        }
-
-        .workflow-arrow {
-          font-size: 1.5rem;
-          color: #999;
-        }
-
-        .info-box {
-          padding: 1rem;
-          background: #cce5ff;
-          border: 2px solid #0056b3;
-          border-radius: 6px;
-          color: #004085;
-          text-align: center;
-          margin-top: 1rem;
-        }
-      `}</style>
+          {!item && itemId && !loading && !error && (
+            <div className="text-center py-12 bg-white border border-gray-200 rounded-lg">
+              <p className="text-sm text-gray-600">Click "Search" to fetch item details</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
