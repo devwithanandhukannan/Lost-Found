@@ -1,5 +1,6 @@
 // MakeLost.jsx
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { contractABI } from '../contractABI';
 
 const statusMap = {
@@ -9,7 +10,7 @@ const statusMap = {
   3: 'Returned'
 };
 
-const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contractABI, addNotification }) => {
+const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contractABI, addNotification, initialItemId }) => {
   const [items, setItems] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [itemId, setItemId] = useState('');
@@ -20,6 +21,7 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
   const [success, setSuccess] = useState('');
   const [transactionPending, setTransactionPending] = useState(false);
   const [view, setView] = useState('list');
+  const [searchParams] = useSearchParams();
 
   // ================= FETCH MY ITEMS =================
   
@@ -28,6 +30,33 @@ const MakeLost = ({ userAcc, walletClient, publicClient, contractAddress, contra
       fetchMyItems();
     }
   }, [userAcc]);
+
+  // ================= HANDLE QUERY PARAMS =================
+  
+  useEffect(() => {
+    const queryItemId = searchParams.get('itemId');
+    if (queryItemId) {
+      setItemId(queryItemId);
+      setView('search');
+      // Delay the search to ensure state is updated
+      setTimeout(() => {
+        handleSearchWithId(parseInt(queryItemId));
+      }, 100);
+    }
+  }, [searchParams, publicClient, userAcc, contractAddress]);
+
+  // ================= HANDLE INITIAL ITEM ID FROM PROP =================
+  
+  useEffect(() => {
+    if (initialItemId && publicClient && userAcc && contractAddress) {
+      setItemId(initialItemId.toString());
+      setView('search');
+      // Delay the search to ensure state is updated
+      setTimeout(() => {
+        handleSearchWithId(parseInt(initialItemId));
+      }, 100);
+    }
+  }, [initialItemId, publicClient, userAcc, contractAddress]);
 
   const fetchMyItems = async () => {
     setItemsLoading(true);

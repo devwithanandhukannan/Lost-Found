@@ -123,9 +123,7 @@ export const updateItemStatus = async (req, res) => {
 
 export const getLostItems = async (req, res) => {
   try {
-    const items = await Item.find({ status: "Lost" }).select(
-      "itemId itemName category color imageCID status"
-    );
+    const items = await Item.find({ status: "Lost" }).populate("user", "name email phoneNumber").sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -258,5 +256,35 @@ export const markItemLost = async (req, res) => {
 
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+export const getItemByQr = async (req, res) => {  
+  try {
+    const { itemId } = req.params;
+
+    const item = await Item.findOne({ itemId: itemId })
+      .populate("user", "name email phoneNumber");
+    console.log(item);
+    
+    if (!item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      item
+    });
+
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
 };

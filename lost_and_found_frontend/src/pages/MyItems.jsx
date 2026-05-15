@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
+import { QRCode } from "react-qr-code";
 
 const MyItems = ({ addNotification }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
+  const qrRef = useRef(null);
 
   useEffect(() => {
     fetchItems();
@@ -36,6 +38,74 @@ const MyItems = ({ addNotification }) => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadQRCode = async (itemId, itemName) => {
+    try {
+      if (!qrRef.current) return;
+      
+      // Get the SVG element from the QR code
+      const svg = qrRef.current.querySelector('svg');
+      if (!svg) {
+        addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'Could not generate QR code image'
+        });
+        return;
+      }
+      
+      // Convert SVG to canvas
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      const svgData = new XMLSerializer().serializeToString(svg);
+      const blob = new Blob([svgData], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        
+        canvas.toBlob((blob) => {
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.download = `${itemName}-${itemId}-qr.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(downloadUrl);
+          
+          addNotification({
+            type: 'success',
+            title: 'Downloaded',
+            message: 'QR code downloaded successfully'
+          });
+        });
+      };
+      
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        addNotification({
+          type: 'error',
+          title: 'Error',
+          message: 'Failed to download QR code'
+        });
+      };
+      
+      img.src = url;
+    } catch (error) {
+      console.error(error);
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to download QR code'
+      });
     }
   };
 
@@ -300,7 +370,37 @@ const MyItems = ({ addNotification }) => {
                   <p className="text-xs text-black font-mono bg-gray-50 p-2 rounded break-all">{expandedItem.txHash}</p>
                 </div>
               </div>
+              {/* QR Code Section */}
+<div className="border-t border-gray-200 pt-4">
+  <div className="flex items-center justify-between mb-3">
+    <p className="text-xs font-medium text-gray-700 uppercase tracking-wide">
+      Item QR Code
+    </p>
+    <button
+      onClick={() => downloadQRCode(expandedItem.itemId, expandedItem.itemName)}
+      className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+      title="Download QR Code"
+    >
+      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round" />
+        <line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  </div>
 
+  <div className="flex flex-col items-center bg-gray-50 p-6 rounded-lg border border-gray-200" ref={qrRef}>
+    
+    <QRCode
+      value={`http://localhost:5173/item/${expandedItem.itemId}`}
+      size={180}
+    />
+
+    <p className="text-xs text-gray-500 mt-4 text-center break-all">
+      http://localhost:5173/item/{expandedItem.itemId}
+    </p>
+  </div>
+</div>
               {/* IPFS Link */}
               <div className="border-t border-gray-200 pt-4">
                 <a

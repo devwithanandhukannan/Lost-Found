@@ -1,7 +1,7 @@
 // src/pages/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import ViewItem from './ViewItem';
 import MakeLost from './MakeLost';
 import RegisterItem from './RegisterItem';
@@ -11,10 +11,13 @@ import { connectMetaMaskLogic } from '../src/walletUtils.js';
 import Sidebar from '../components/Sidebar/Sidebar.jsx';
 import NotificationToast from '../components/Toast/NotificationToast.jsx';
 import { useNotification } from '../hooks/useNotification';
+import LostItems from './LostItems.jsx';
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState('my-products');
+  const [reportFoundItemId, setReportFoundItemId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const { notifications, addNotification, removeNotification } = useNotification();
@@ -32,6 +35,19 @@ export default function Dashboard() {
     contractAddress,
     contractABI,
   } = connectMetaMaskLogic();
+
+  // Handle query parameters for report-found action
+  useEffect(() => {
+    const action = searchParams.get('action');
+    const itemId = searchParams.get('itemId');
+    
+    if (action === 'report-found' && itemId) {
+      setActiveTab('report-missing');
+      setReportFoundItemId(itemId);
+      // Clean up the URL
+      navigate('/dashboard', { replace: true });
+    }
+  }, [searchParams, navigate]);
 
   // Handle window resize
   useEffect(() => {
@@ -102,6 +118,7 @@ export default function Dashboard() {
     const titles = {
       'report-missing': 'Report Missing Item',
       'my-products': 'My Products',
+      'all-missing': 'All Missing Items',
       'missing': 'Missing Products',
       'notifications': 'Notifications',
       'register': 'Register New Product',
@@ -115,6 +132,7 @@ export default function Dashboard() {
       'report-missing': 'Report an item as lost and notify the community',
       'my-products': 'All your registered items',
       'missing': 'Items reported as lost',
+      'all-missing': 'All items reported as lost by the community',
       'notifications': 'Found item reports',
       'register': 'Mint NFT ownership proof',
       'status': 'Manage item status',
@@ -348,6 +366,7 @@ export default function Dashboard() {
                       contractAddress={contractAddress}
                       contractABI={contractABI}
                       addNotification={addNotification}
+                      initialItemId={reportFoundItemId}
                     />
                   )}
 
@@ -355,6 +374,9 @@ export default function Dashboard() {
                     <Notifications
                       addNotification={addNotification}
                     />
+                  )}
+                  {activeTab === 'all-missing' && (
+                    <LostItems/>
                   )}
 
                   {activeTab === 'register' && (

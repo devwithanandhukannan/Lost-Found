@@ -29,7 +29,17 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, setIsOpen, userAcc, onLogout
     },
     {
       id: 'missing',
-      label: 'Missing Products',
+      label: 'My Missing Products',
+      icon: (
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 8v4m0 4v.01" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+    {
+      id: 'all-missing',
+      label: 'All Missing Products',
       icon: (
         <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="9" />
