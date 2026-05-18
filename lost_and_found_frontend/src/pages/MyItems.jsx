@@ -409,9 +409,8 @@ const MyItems = ({ addNotification }) => {
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
                 >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M13.2 3H12a2 2 0 0 0-2 2v9.5M9 17H5a2 2 0 0 1-2-2v-4M19 3h1.2a2 2 0 0 1 2 2v4m0 0a2 2 0 0 1-2 2h-1.2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <svg width="20px" height="20px" viewBox="0 0 1024.00 1024.00" xmlns="http://www.w3.org/2000/svg" fill="#000000" transform="rotate(0)"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round" stroke="#CCCCCC" stroke-width="2.048"></g><g id="SVGRepo_iconCarrier"><path fill="#000000" d="M768 256H353.6a32 32 0 1 1 0-64H800a32 32 0 0 1 32 32v448a32 32 0 0 1-64 0V256z">
+                    </path><path fill="#000000" d="M777.344 201.344a32 32 0 0 1 45.312 45.312l-544 544a32 32 0 0 1-45.312-45.312l544-544z"></path></g></svg>
                   View on IPFS Gateway
                 </a>
               </div>
